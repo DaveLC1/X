@@ -26,7 +26,24 @@ BOT_TOKEN = "8875229976:AAFApchdQ-SI5-DvJYf_9E3ln4L8kPz8yHc"
 
 user_links = {}
 
-# STEP 1: HANDLE LINK
+# BYPASS TWITTER/X BLOCKS & SCRAPE FORMATS
+BASE_YDL_OPTS = {
+    "quiet": True,
+    "no_warnings": True,
+    "check_formats": False,
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "http_headers": {
+        "Referer": "https://x.com/",
+        "Accept": "*/*",
+    },
+    "extractor_args": {
+        "twitter": {
+            "api": "syndication",
+        }
+    }
+}
+
+# STEP 1: HANDLE LINK & SHOW QUALITY OPTIONS
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = update.message.text.strip()
     user_id = update.message.from_user.id
@@ -36,48 +53,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     user_links[user_id] = url
-
-    await update.message.reply_text("🔍 Fetching media...")
-
-    ydl_opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "http_headers": {
-            "Referer": "https://x.com/",
-        },
-    }
+    status_msg = await update.message.reply_text("🔍 Fetching quality formats...")
 
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        # Try fetching formats via yt-dlp first
+        with yt_dlp.YoutubeDL(BASE_YDL_OPTS) as ydl:
             info = ydl.extract_info(url, download=False)
 
-        # Check for image post
-        images = [
-            f.get("url") for f in info.get("formats", [])
-            if f.get("ext") in ["jpg", "jpeg", "png", "webp"] or (f.get("vcodec") == "none" and f.get("acodec") == "none")
-        ]
-        
-        # Fallback check for single thumbnail/photo entry
-        if not images and info.get("ext") in ["jpg", "jpeg", "png", "webp"]:
-            images = [info.get("url")]
+        if "entries" in info:
+            info = info["entries"][0]
 
-        if images:
-            img_url = images[0]
-            img_data = requests.get(img_url).content
-            filename = f"{user_id}.jpg"
-            with open(filename, "wb") as f:
-                f.write(img_data)
-            with open(filename, "rb") as photo:
-                await update.message.reply_photo(photo)
-            os.remove(filename)
-            return
-
-        # Handle video formats
+        formats_list = info.get("formats", [])
         formats = []
         seen_qualities = set()
 
-        for f in info.get("formats", []):
+        for f in formats_list:
             if f.get("vcodec") == "none":
                 continue
 
@@ -95,36 +85,76 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 seen_qualities.add(height)
 
             filesize = f.get("filesize") or f.get("filesize_approx")
-            size_mb = f" - {round(filesize / (1024 * 1024), 2)}MB" if filesize else ""
+            size_mb = f" ({round(filesize / (1024 * 1024), 1)}MB)" if filesize else ""
 
             formats.append({
                 "format_id": format_id,
                 "text": f"{label}{size_mb}"
             })
 
-        if not formats:
-            await update.message.reply_text("❌ No downloadable media found")
+        # If formats found, display buttons (lowest to highest quality)
+        if formats:
+            formats = sorted(
+                formats,
+                key=lambda x: int(x["text"].split("p")[0]) if x["text"].split("p")[0].isdigit() else 0
+            )[:6]
+
+            keyboard = [
+                [InlineKeyboardButton(f["text"], callback_data=f["format_id"])]
+                for f in formats
+            ]
+
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await status_msg.edit_text("🎬 Choose video quality:", reply_markup=reply_markup)
             return
 
-        formats = sorted(
-            formats,
-            key=lambda x: int(x["text"].split("p")[0]) if x["text"].split("p")[0].isdigit() else 0,
-            reverse=True
-        )[:6]
+    except Exception:
+        pass  # If yt-dlp fails (e.g., photo post or full block), fallback to direct Cobalt download below
 
-        keyboard = [
-            [InlineKeyboardButton(f["text"], callback_data=f["format_id"])]
-            for f in formats
-        ]
+    # FALLBACK FOR PHOTOS / BLOCKED POSTS
+    try:
+        res = requests.post(
+            "https://api.cobalt.tools/api/json",
+            json={"url": url},
+            headers={"Accept": "application/json", "Content-Type": "application/json"}
+        ).json()
 
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text("🎬 Choose quality:", reply_markup=reply_markup)
+        if res.get("status") in ["stream", "redirect"]:
+            file_response = requests.get(res.get("url"))
+            content_type = file_response.headers.get("Content-Type", "")
+            ext = ".mp4" if "video" in content_type else ".jpg"
+            filename = f"{user_id}{ext}"
+
+            with open(filename, "wb") as f:
+                f.write(file_response.content)
+
+            with open(filename, "rb") as media_file:
+                if ext == ".mp4":
+                    await update.message.reply_video(media_file)
+                else:
+                    await update.message.reply_photo(media_file)
+
+            os.remove(filename)
+            await status_msg.delete()
+            return
+
+        elif res.get("status") == "picker":
+            for item in res.get("picker", []):
+                img_data = requests.get(item.get("url")).content
+                filename = f"{user_id}_photo.jpg"
+                with open(filename, "wb") as f:
+                    f.write(img_data)
+                with open(filename, "rb") as photo:
+                    await update.message.reply_photo(photo)
+                os.remove(filename)
+            await status_msg.delete()
+            return
 
     except Exception as e:
-        await update.message.reply_text(f"❌ Error fetching formats:\n{e}")
+        await status_msg.edit_text(f"❌ Failed to fetch media:\n{e}")
 
 
-# STEP 2: HANDLE BUTTON CLICK
+# STEP 2: HANDLE BUTTON CLICK (DOWNLOAD SPECIFIC FORMAT)
 async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -137,18 +167,14 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("⚠️ Session expired. Send link again.")
         return
 
-    await query.edit_message_text("⬇️ Downloading...")
+    await query.edit_message_text("⬇️ Downloading chosen quality...")
 
     filename = f"{user_id}.mp4"
 
     ydl_opts = {
+        **BASE_YDL_OPTS,
         "format": format_id,
         "outtmpl": filename,
-        "quiet": True,
-        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "http_headers": {
-            "Referer": "https://x.com/",
-        },
     }
 
     try:
@@ -164,7 +190,7 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text(f"❌ Download failed:\n{e}")
 
 
-# START FLASK IN A BACKGROUND THREAD
+# START FLASK SERVER IN BACKGROUND
 threading.Thread(target=run_web, daemon=True).start()
 
 # RUN BOT
@@ -175,4 +201,3 @@ app.add_handler(CallbackQueryHandler(handle_button))
 
 print("🚀 Bot is running...")
 app.run_polling()
-    
