@@ -9,6 +9,17 @@ from telegram.ext import (
     filters,
 )
 
+from flask import Flask
+web_app = Flask(__name__)
+
+@web_app.route("/")
+def home(): 
+    return "Deployment Active"
+
+def run_web():
+    port = int(os.environ.get("PORT", 10000))
+    web_app.run(host="0.0.0.0", port=port, use_reloader=False)
+    
 BOT_TOKEN = "8565200793:AAFteufhny56VqgU3mKeYfkzNITFm4hQwuE"
 
 # Store user links
