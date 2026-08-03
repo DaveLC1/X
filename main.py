@@ -74,7 +74,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             })
 
         if not formats:
-            await update.message.reply_text("❌ No downloadable formats found)
+            await update.message.reply_text("❌ No downloadable formats found")
             return
 
         # Sort qualities (highest first)
