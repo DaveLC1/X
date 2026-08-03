@@ -1,5 +1,6 @@
 import yt_dlp
 import os
+import requests
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
@@ -22,7 +23,6 @@ def run_web():
     
 BOT_TOKEN = "8565200793:AAFteufhny56VqgU3mKeYfkzNITFm4hQwuE"
 
-# Store user links
 user_links = {}
 
 # STEP 1: HANDLE LINK
@@ -36,52 +36,81 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_links[user_id] = url
 
-    await update.message.reply_text("🔍 Fetching formats...")
+    await update.message.reply_text("🔍 Fetching media...")
 
-    formats = []
-    seen_qualities = set()
-
-    ydl_opts = {"quiet": True}
+    ydl_opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "http_headers": {
+            "Referer": "https://x.com/",
+        },
+    }
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
 
+        # Check for image post
+        images = [
+            f.get("url") for f in info.get("formats", [])
+            if f.get("ext") in ["jpg", "jpeg", "png", "webp"] or f.get("vcodec") == "none" and f.get("acodec") == "none"
+        ]
+        
+        # Fallback check for single thumbnail/photo entry
+        if not images and info.get("ext") in ["jpg", "jpeg", "png", "webp"]:
+            images = [info.get("url")]
+
+        if images:
+            # Direct photo download
+            img_url = images[0]
+            img_data = requests.get(img_url).content
+            filename = f"{user_id}.jpg"
+            with open(filename, "wb") as f:
+                f.write(img_data)
+            with open(filename, "rb") as photo:
+                await update.message.reply_photo(photo)
+            os.remove(filename)
+            return
+
+        # Handle video formats
+        formats = []
+        seen_qualities = set()
+
         for f in info.get("formats", []):
+            if f.get("vcodec") == "none":
+                continue
+
             height = f.get("height")
             format_id = f.get("format_id")
 
-            if not height or not format_id:
+            if not format_id:
                 continue
 
-            # Avoid duplicate qualities (e.g multiple 720p)
-            if height in seen_qualities:
-                continue
+            label = f"{height}p" if height else format_id
 
-            seen_qualities.add(height)
+            if height and height in seen_qualities:
+                continue
+            if height:
+                seen_qualities.add(height)
 
             filesize = f.get("filesize") or f.get("filesize_approx")
-
-            if filesize:
-                size_mb = round(filesize / (1024 * 1024), 2)
-                text = f"{height}p - {size_mb}MB"
-            else:
-                text = f"{height}p"
+            size_mb = f" - {round(filesize / (1024 * 1024), 2)}MB" if filesize else ""
 
             formats.append({
                 "format_id": format_id,
-                "text": text
+                "text": f"{label}{size_mb}"
             })
 
         if not formats:
-            await update.message.reply_text("❌ No downloadable formats found")
+            await update.message.reply_text("❌ No downloadable media found")
             return
 
-        # Sort qualities (highest first)
-        formats = sorted(formats, key=lambda x: int(x["text"].split("p")[0]), reverse=True)
-
-        # Limit buttons
-        formats = formats[:6]
+        formats = sorted(
+            formats,
+            key=lambda x: int(x["text"].split("p")[0]) if x["text"].split("p")[0].isdigit() else 0,
+            reverse=True
+        )[:6]
 
         keyboard = [
             [InlineKeyboardButton(f["text"], callback_data=f["format_id"])]
@@ -116,6 +145,10 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "format": format_id,
         "outtmpl": filename,
         "quiet": True,
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "http_headers": {
+            "Referer": "https://x.com/",
+        },
     }
 
     try:
@@ -125,7 +158,6 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         with open(filename, "rb") as video:
             await query.message.reply_video(video)
 
-        # Clean up file after sending
         os.remove(filename)
 
     except Exception as e:
@@ -140,4 +172,3 @@ app.add_handler(CallbackQueryHandler(handle_button))
 
 print("🚀 Bot is running...")
 app.run_polling()
-            
