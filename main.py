@@ -78,7 +78,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         # Sort qualities (highest first)
-        formats = sorted(formats, key=lambda x: int(x["text"].split("p")[0]),>
+        formats = sorted(formats, key=lambda x: int(x["text"].split("p")[0]), reverse=True)
 
         # Limit buttons
         formats = formats[:6]
@@ -89,7 +89,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
 
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text("🎬 Choose quality:", reply_markup=re>
+        await update.message.reply_text("🎬 Choose quality:", reply_markup=reply_markup)
 
     except Exception as e:
         await update.message.reply_text(f"❌ Error fetching formats:\n{e}")
@@ -135,8 +135,9 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # RUN BOT
 app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_messag>
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 app.add_handler(CallbackQueryHandler(handle_button))
 
 print("🚀 Bot is running...")
 app.run_polling()
+            
