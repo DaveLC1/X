@@ -1,6 +1,7 @@
 import yt_dlp
 import os
 import requests
+import threading
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
@@ -20,8 +21,8 @@ def home():
 def run_web():
     port = int(os.environ.get("PORT", 10000))
     web_app.run(host="0.0.0.0", port=port, use_reloader=False)
-    
-BOT_TOKEN = "8875229976:AAFApchdQ-SI5-DvJYf_9E3ln4L8kPz8yHc"
+
+BOT_TOKEN = "8565200793:AAFteufhny56VqgU3mKeYfkzNITFm4hQwuE"
 
 user_links = {}
 
@@ -54,7 +55,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Check for image post
         images = [
             f.get("url") for f in info.get("formats", [])
-            if f.get("ext") in ["jpg", "jpeg", "png", "webp"] or f.get("vcodec") == "none" and f.get("acodec") == "none"
+            if f.get("ext") in ["jpg", "jpeg", "png", "webp"] or (f.get("vcodec") == "none" and f.get("acodec") == "none")
         ]
         
         # Fallback check for single thumbnail/photo entry
@@ -62,7 +63,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             images = [info.get("url")]
 
         if images:
-            # Direct photo download
             img_url = images[0]
             img_data = requests.get(img_url).content
             filename = f"{user_id}.jpg"
@@ -164,6 +164,9 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text(f"❌ Download failed:\n{e}")
 
 
+# START FLASK IN A BACKGROUND THREAD
+threading.Thread(target=run_web, daemon=True).start()
+
 # RUN BOT
 app = ApplicationBuilder().token(BOT_TOKEN).build()
 
@@ -172,3 +175,4 @@ app.add_handler(CallbackQueryHandler(handle_button))
 
 print("🚀 Bot is running...")
 app.run_polling()
+    
