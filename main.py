@@ -21,7 +21,7 @@ def run_web():
     port = int(os.environ.get("PORT", 10000))
     web_app.run(host="0.0.0.0", port=port, use_reloader=False)
     
-BOT_TOKEN = "8565200793:AAFteufhny56VqgU3mKeYfkzNITFm4hQwuE"
+BOT_TOKEN = "8875229976:AAFApchdQ-SI5-DvJYf_9E3ln4L8kPz8yHc"
 
 user_links = {}
 
